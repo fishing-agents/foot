@@ -3,6 +3,7 @@
 
 const char version_and_features[] =
     "version: " FOOT_VERSION
+    " +kitty-graphics"
 
 #if defined(FOOT_PGO_ENABLED) && FOOT_PGO_ENABLED
     " +pgo"

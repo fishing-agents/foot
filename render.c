@@ -36,6 +36,7 @@
 #include "grid.h"
 #include "ime.h"
 #include "input.h"
+#include "kitty.h"
 #include "quirks.h"
 #include "search.h"
 #include "selection.h"
@@ -3525,6 +3526,12 @@ grid_render(struct terminal *term)
         }
     }
 
+    /* Positive-z Kitty placements composite after text. Mark every underlying
+     * row dirty on every rendered frame so the previous frame's translucent
+     * pixels are replaced before this frame's OVER operation (no alpha build-
+     * up on reused SHM buffers). */
+    kitty_render_prepare(term);
+
 #if defined(_DEBUG)
     for (int r = 0; r < term->rows; r++) {
         const struct row *row = grid_row_in_view(term->grid, r);
@@ -3594,6 +3601,8 @@ grid_render(struct terminal *term)
 
     for (size_t i = 0; i < term->render.workers.count; i++)
         pixman_region32_union(&damage, &damage, &buf->dirty[i + 1]);
+
+    kitty_render_placements(term, buf->pix[0], &damage);
 
     pixman_region32_union(&buf->dirty[0], &buf->dirty[0], &damage);
 

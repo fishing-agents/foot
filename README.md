@@ -1,5 +1,10 @@
 # ![Logo: a terminal with a foot shaped prompt](icons/hicolor/48x48/apps/foot.png) foot
 
+> **fishing-agents fork:** adds static [Kitty graphics protocol support](doc/kitty-graphics.md).
+> Upstream Foot is [dnkl/foot on Codeberg](https://codeberg.org/dnkl/foot).
+> The graphics changes in this fork are AI-assisted and are not submitted to upstream,
+> whose contribution policy below remains preserved for reference.
+
 The fast, lightweight and minimalistic Wayland terminal emulator.
 
 [![CI status](https://ci.codeberg.org/api/badges/dnkl/foot/status.svg)](https://ci.codeberg.org/dnkl/foot)

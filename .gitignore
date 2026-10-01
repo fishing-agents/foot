@@ -1,4 +1,8 @@
 /bld/
+/build/
+/build-*/
+__pycache__/
+*.pyc
 /pkg/
 /src/
 /subprojects/*/

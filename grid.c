@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "kitty.h"
+
 #define LOG_MODULE "grid"
 #define LOG_ENABLE_DBG 0
 #include "log.h"
@@ -284,6 +286,7 @@ grid_snapshot(const struct grid *grid)
     clone->rows = xcalloc(grid->num_rows, sizeof(clone->rows[0]));
     memset(&clone->scroll_damage, 0, sizeof(clone->scroll_damage));
     memset(&clone->sixel_images, 0, sizeof(clone->sixel_images));
+    memset(&clone->kitty_placements, 0, sizeof(clone->kitty_placements));
 
     tll_foreach(grid->scroll_damage, it)
         tll_push_back(clone->scroll_damage, it->item);
@@ -397,6 +400,23 @@ grid_snapshot(const struct grid *grid)
         tll_push_back(clone->sixel_images, six);
     }
 
+    bool placements_ok = true;
+    tll_foreach(grid->kitty_placements, it) {
+        struct kitty_placement placement;
+        if (!kitty_placement_clone(&placement, &it->item)) {
+            placements_ok = false;
+            break;
+        }
+        tll_push_back(clone->kitty_placements, placement);
+    }
+
+    if (!placements_ok) {
+        /* URL-mode callers require a non-null snapshot. On image allocation
+         * failure retain the independent text snapshot without image surfaces;
+         * never return a shallow alias or an unexpected null grid. */
+        kitty_placements_clear(clone);
+    }
+
     return clone;
 }
 
@@ -413,6 +433,7 @@ grid_free(struct grid *grid)
         sixel_destroy(&it->item);
         tll_remove(grid->sixel_images, it);
     }
+    kitty_placements_clear(grid);
 
     free(grid->rows);
     tll_free(grid->scroll_damage);
@@ -472,6 +493,11 @@ grid_resize_without_reflow(
     struct grid *grid, int new_rows, int new_cols,
     int old_screen_rows, int new_screen_rows)
 {
+    /* Placements are not row tracking points. Drop them before row remapping;
+     * retaining an absolute ring row through resize would anchor images to
+     * unrelated text. Reflow-aware Kitty placement mapping is not supported. */
+    kitty_placements_clear(grid);
+
     struct row *const *old_grid = grid->rows;
     const int old_rows = grid->num_rows;
     const int old_cols = grid->num_cols;
@@ -823,6 +849,10 @@ grid_resize_and_reflow(
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
+
+    /* Runtime Kitty placements do not participate in the text reflow mapping.
+     * Discard them before rows are translated to avoid stale anchors. */
+    kitty_placements_clear(grid);
 
     struct row *const *old_grid = grid->rows;
     const int old_rows = grid->num_rows;

@@ -39,6 +39,7 @@
 #include "selection.h"
 #include "shm.h"
 #include "sixel.h"
+#include "kitty.h"
 #include "slave.h"
 #include "spawn.h"
 #include "url-mode.h"
@@ -1940,6 +1941,7 @@ term_destroy(struct terminal *term)
         notify_icon_free(&term->notification_icons[i]);
 
     sixel_fini(term);
+    kitty_fini(term);
 
     term_ime_reset(term);
 
@@ -2134,6 +2136,10 @@ term_reset(struct terminal *term, bool hard)
 
     term->scroll_region.start = 0;
     term->scroll_region.end = term->rows;
+
+    kitty_cancel(term);
+    if (hard)
+        kitty_reset(term);
 
     free(term->vt.osc8.uri);
     free(term->vt.osc.data);
@@ -3086,6 +3092,14 @@ term_scroll_partial(struct terminal *term, struct scroll_region region, int rows
     }
 
     sixel_scroll_up(term, rows);
+    if (region.start == 0 && region.end == term->rows)
+        kitty_scroll_up(term, rows);
+    else if (tll_length(term->grid->kitty_placements) > 0) {
+        /* Partial scrolling swaps physical rows outside the region. Without
+         * full placement reflow, drop images instead of corrupting anchors. */
+        kitty_placements_clear(term->grid);
+        term_damage_view(term);
+    }
 
     /* How many lines from the scrollback start is the current viewport? */
     int view_sb_start_distance = grid_row_abs_to_sb(
@@ -3172,6 +3186,12 @@ term_scroll_reverse_partial(struct terminal *term,
     }
 
     sixel_scroll_down(term, rows);
+    if (region.start == 0 && region.end == term->rows)
+        kitty_scroll_down(term, rows);
+    else if (tll_length(term->grid->kitty_placements) > 0) {
+        kitty_placements_clear(term->grid);
+        term_damage_view(term);
+    }
 
     const bool view_follows = term->grid->view == term->grid->offset;
     term->grid->offset -= rows;

@@ -146,6 +146,8 @@ math = cc.find_library('m')
 threads = [dependency('threads'), cc.find_library('stdthreads', required: false)]
 libepoll = dependency('epoll-shim', required: false)
 pixman = dependency('pixman-1')
+png = dependency('libpng')
+zlib = dependency('zlib')
 wayland_protocols = dependency('wayland-protocols', version: '>=1.41',
                                fallback: 'wayland-protocols',
                                default_options: ['tests=false'])
@@ -279,11 +281,13 @@ vtlib = static_library(
   'macros.h',
   'osc.c', 'osc.h',
   'sixel.c', 'sixel.h',
+  'kitty.c', 'kitty.h',
+  'kitty-graphics.c', 'kitty-graphics.h',
   'vt.c', 'vt.h',
   builtin_terminfo, srgb_funcs,
   wl_proto_src + wl_proto_headers,
   version,
-  dependencies: [libepoll, pixman, fcft, tllist, wayland_client, xkb, utf8proc],
+  dependencies: [libepoll, pixman, fcft, tllist, wayland_client, xkb, utf8proc, png, zlib],
   link_with: [common, misc],
 )
 
@@ -435,6 +439,19 @@ subdir('icons')
 subdir('utils')
 
 if (get_option('tests'))
+  kitty_graphics_test = executable(
+    'test-kitty-graphics',
+    'test-kitty-graphics.c', 'kitty-graphics.c',
+    dependencies: [png, zlib], c_args: ['-UNDEBUG'])
+  test('kitty-graphics', kitty_graphics_test)
+  kitty_render_test = executable(
+    'test-kitty-render',
+    'tests/test-kitty-render.c', 'kitty.c', 'kitty-graphics.c',
+    wl_proto_headers,
+    link_with: common,
+    dependencies: [pixman, fcft, tllist, wayland_client, xkb, png, zlib],
+    c_args: ['-UNDEBUG'])
+  test('kitty-render', kitty_render_test)
   subdir('tests')
 endif
 

@@ -18,6 +18,7 @@
 #include "debug.h"
 #include "osc.h"
 #include "sixel.h"
+#include "kitty.h"
 #include "util.h"
 #include "xmalloc.h"
 
@@ -44,6 +45,8 @@ enum state {
     STATE_DCS_PASSTHROUGH,
 
     STATE_SOS_PM_APC_STRING,
+    STATE_APC_STRING,
+    STATE_APC_ESCAPE,
 
     STATE_UTF8_21,
     STATE_UTF8_31,
@@ -796,7 +799,8 @@ state_escape_switch(struct terminal *term, uint8_t data)
     case 0x5b:                                                                            action_clear(term);              return STATE_CSI_ENTRY;
     case 0x5c:                                           action_esc_dispatch(term, data);                                  return STATE_GROUND;
     case 0x5d:                                                                            action_osc_start(term, data);    return STATE_OSC_STRING;
-    case 0x5e ... 0x5f:                                                                                                    return STATE_SOS_PM_APC_STRING;
+    case 0x5e: return STATE_SOS_PM_APC_STRING;
+    case 0x5f: kitty_begin(term); return STATE_APC_STRING;
     case 0x60 ... 0x7e:                                  action_esc_dispatch(term, data);                                  return STATE_GROUND;
     case 0x7f:                                           action_ignore(term);                                              return STATE_ESCAPE;
     }
@@ -1022,6 +1026,39 @@ state_dcs_passthrough_switch(struct terminal *term, uint8_t data)
     }
 }
 
+/* APC is dispatched only after a complete ST; an interrupted string must
+ * never install a partial image. State survives PTY read boundaries. */
+static enum state
+state_apc_string_switch(struct terminal *term, uint8_t data)
+{
+    switch (data) {
+    case 0x1b:
+        return STATE_APC_ESCAPE;
+    case 0x9c:
+        kitty_end(term);
+        return STATE_GROUND;
+    case 0x18:
+    case 0x1a:
+        kitty_cancel(term);
+        return STATE_GROUND;
+    default:
+        kitty_put(term, data);
+        return STATE_APC_STRING;
+    }
+}
+
+static enum state
+state_apc_escape_switch(struct terminal *term, uint8_t data)
+{
+    if (data == '\\') {
+        kitty_end(term);
+        return STATE_GROUND;
+    }
+    kitty_cancel(term);
+    action_clear(term);
+    return state_escape_switch(term, data);
+}
+
 static enum state
 state_sos_pm_apc_string_switch(struct terminal *term, uint8_t data)
 {
@@ -1119,6 +1156,8 @@ vt_from_slave(struct terminal *term, const uint8_t *data, size_t len)
         case STATE_DCS_IGNORE:          current_state = state_dcs_ignore_switch(term, *p); break;
         case STATE_DCS_PASSTHROUGH:     current_state = state_dcs_passthrough_switch(term, *p); break;
         case STATE_SOS_PM_APC_STRING:   current_state = state_sos_pm_apc_string_switch(term, *p); break;
+        case STATE_APC_STRING:          current_state = state_apc_string_switch(term, *p); break;
+        case STATE_APC_ESCAPE:          current_state = state_apc_escape_switch(term, *p); break;
 
         case STATE_UTF8_21:             current_state = state_utf8_21_switch(term, *p); break;
         case STATE_UTF8_31:             current_state = state_utf8_31_switch(term, *p); break;

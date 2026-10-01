@@ -204,6 +204,26 @@ struct sixel {
     } scaled;
 };
 
+struct kitty_graphics;
+
+/* A terminal-owned, independently placed Kitty image. The backing pixels and
+ * pixman image are both owned by this placement (never shared with the image
+ * protocol engine or with a grid snapshot). */
+struct kitty_placement {
+    uint32_t image_id;
+    uint32_t placement_id;
+    int row;                    /* absolute circular grid row */
+    int col;
+    int cols, rows;
+    bool cols_implicit, rows_implicit;
+    int x_offset, y_offset;     /* pixels */
+    int z_index;                /* negative z is currently unsupported */
+    int width, height;
+    size_t size;
+    uint32_t *pixels;
+    pixman_image_t *pix;
+};
+
 enum kitty_kbd_flags {
     KITTY_KBD_DISAMBIGUATE = 0x01,
     KITTY_KBD_REPORT_EVENT = 0x02,
@@ -240,6 +260,7 @@ struct grid {
 
     tll(struct damage) scroll_damage;
     tll(struct sixel) sixel_images;
+    tll(struct kitty_placement) kitty_placements;
 
     struct {
         enum kitty_kbd_flags flags[8];
@@ -421,6 +442,14 @@ struct terminal {
     int ptmx;
 
     struct vt vt;
+    struct kitty_graphics *kitty_graphics;
+    struct {
+        char *header;
+        size_t header_len;
+        size_t header_cap;
+        bool in_payload;
+        bool failed;
+    } kitty_apc;
     struct grid *grid;
     struct grid normal;
     struct grid alt;
