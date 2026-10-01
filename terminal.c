@@ -3097,8 +3097,7 @@ term_scroll_partial(struct terminal *term, struct scroll_region region, int rows
     else if (tll_length(term->grid->kitty_placements) > 0) {
         /* Partial scrolling swaps physical rows outside the region. Without
          * full placement reflow, drop images instead of corrupting anchors. */
-        kitty_placements_clear(term->grid);
-        term_damage_view(term);
+        kitty_placements_invalidate(term);
     }
 
     /* How many lines from the scrollback start is the current viewport? */
@@ -3173,6 +3172,13 @@ term_scroll_reverse_partial(struct terminal *term,
             selection_scroll_down(term, rows);
     }
 
+    /* Image invalidation reads the old viewport's rows. Do this before
+     * releasing outgoing rows, including placements wholly scrolled out. */
+    if (region.start == 0 && region.end == term->rows)
+        kitty_scroll_down(term, rows);
+    else if (tll_length(term->grid->kitty_placements) > 0)
+        kitty_placements_invalidate(term);
+
     /* Unallocate scrolled out lines */
     for (int r = region.end - rows; r < region.end; r++) {
         const int abs_r = grid_row_absolute(term->grid, r);
@@ -3186,12 +3192,6 @@ term_scroll_reverse_partial(struct terminal *term,
     }
 
     sixel_scroll_down(term, rows);
-    if (region.start == 0 && region.end == term->rows)
-        kitty_scroll_down(term, rows);
-    else if (tll_length(term->grid->kitty_placements) > 0) {
-        kitty_placements_clear(term->grid);
-        term_damage_view(term);
-    }
 
     const bool view_follows = term->grid->view == term->grid->offset;
     term->grid->offset -= rows;

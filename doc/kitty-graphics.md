@@ -69,6 +69,49 @@ predictable; they are not hidden behind a blanket “Kitty compatible” label:
   Delete-all currently clears placements in both grids and scrollback, rather
   than Kitty's visible-only selection; uppercase delete-all frees stored data.
 
+## Incremental rendering (Kitty and Sixel)
+
+Both protocols retain already-composited pixels in Foot's normal render buffers.
+Full-screen scrolling reuses Foot's existing pixel-copy scroll path. Buffer-age
+repairs copy the complete previous frame, including images; neither kind of copy
+is treated as a fresh background that should receive another alpha blend.
+
+- Kitty no longer dirties every visible image on every frame. After the text
+  workers finish, images composite only where actual text/Sixel repaint damage
+  intersects their bounds. New, replaced and deleted placements dirty only
+  their affected cells, including pixel offsets and aspect-fit letterboxing.
+- Sixel previously copied the full image width for each dirty row chunk. It now
+  clips those chunks to dirty-cell rectangles and actual text/glyph damage.
+  A snapshot taken before text/opaque images clean cell flags preserves damage
+  for multiple images sharing a row. Transparent images are blended only over
+  restored backgrounds, and partial-cell edges still erase uncovered pixels.
+- Partial-region Kitty scrolling still discards placements, but invalidates
+  their old cell bounds rather than explicitly damaging the whole viewport.
+  Placement-preserving partial-region reflow is not implemented.
+
+This is **incremental redisplay**, not a new Sixel wire-protocol extension:
+Sixel uploads still need to be decoded, and resizing/scaling can rebuild image
+caches. Full repaint remains necessary when the underlying viewport is fully
+damaged. Graphics are CPU-composited with Pixman, not rendered by a GPU.
+
+`test-image-render` exercises the production Kitty and Sixel compositors with
+isolated text-drawing/cache callbacks. It checks exact pixels, alpha stability,
+scroll-copy reuse, recycled buffers, unrelated cell edits, shared dirty rows,
+partial-cell edges and overflowing glyphs. On a 1024×1024 image with 16×16 cells:
+
+- Kitty: full repaint submits 1,048,576 image pixels; one changed cell submits
+  256; a clean frame submits zero.
+- Sixel: the former full-width dirty strip was 16,384 pixels; one changed cell
+  now submits 256; a clean frame submits zero.
+
+An optional CPU microbenchmark compares full-background/full-image repaint
+against one-cell background/image repaint. It is not an end-to-end scrolling
+FPS benchmark, and timings depend on the machine and build type:
+
+```sh
+./build/test-image-render --benchmark
+```
+
 ## Tests
 
 `meson test -C build --print-errorlogs` runs the protocol regression tests as well
@@ -82,6 +125,11 @@ python3 tests/kitty-graphics-smoke.py build/foot
 The smoke test checks actual PTY responses for queries, RGB/RGBA/PNG uploads,
 compression, multiple placements, chunked uploads, malformed input, interruption,
 and deletion. Placements remain alive long enough for a Wayland frame to render.
+It also exercises cell edits, forward/reverse scrolling, alternate-grid buffer
+reuse, opaque/transparent Sixels and mixed partial-region scrolling. These
+Wayland checks validate execution and PTY responsiveness; pixel correctness and
+composited work are asserted separately by `test-image-render`. Set
+`FOOT_SMOKE_WORKERS=2` to exercise the threaded text renderer as well.
 CI uses Weston 14 headless and the test-only `tests/weston-seat.c` module to
 expose a real device-less `wl_seat`, which headless Weston otherwise omits.
 The module does not mock terminal behavior or manufacture protocol replies.

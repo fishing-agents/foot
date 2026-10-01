@@ -87,8 +87,7 @@ int main(void)
     pixman_image_t *image = pixman_image_create_bits(PIXMAN_a8r8g8b8, 8, 8, pixels, 32);
     assert(image);
     pixman_region32_t damage;
-    pixman_region32_init(&damage);
-    kitty_render_prepare(&term);
+    pixman_region32_init_rect(&damage, 0, 0, 8, 8);
     assert(term.normal.rows[0]->dirty);
     assert(!term.normal.rows[0]->cells[0].attrs.clean);
     kitty_render_placements(&term, image, &damage);

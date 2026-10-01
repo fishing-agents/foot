@@ -282,6 +282,8 @@ vtlib = static_library(
   'osc.c', 'osc.h',
   'sixel.c', 'sixel.h',
   'kitty.c', 'kitty.h',
+  'image-render.c', 'image-render.h',
+  'sixel-render.c', 'sixel-render.h',
   'kitty-graphics.c', 'kitty-graphics.h',
   'vt.c', 'vt.h',
   builtin_terminfo, srgb_funcs,
@@ -446,12 +448,20 @@ if (get_option('tests'))
   test('kitty-graphics', kitty_graphics_test)
   kitty_render_test = executable(
     'test-kitty-render',
-    'tests/test-kitty-render.c', 'kitty.c', 'kitty-graphics.c',
+    'tests/test-kitty-render.c', 'kitty.c', 'kitty-graphics.c', 'image-render.c',
     wl_proto_headers,
     link_with: common,
     dependencies: [pixman, fcft, tllist, wayland_client, xkb, png, zlib],
     c_args: ['-UNDEBUG'])
   test('kitty-render', kitty_render_test)
+  image_render_test = executable(
+    'test-image-render',
+    'tests/test-image-render.c', 'kitty.c', 'kitty-graphics.c',
+    'image-render.c', 'sixel-render.c', wl_proto_headers,
+    link_with: common,
+    dependencies: [pixman, fcft, tllist, wayland_client, xkb, png, zlib],
+    c_args: ['-UNDEBUG'])
+  test('image-render', image_render_test)
   subdir('tests')
 endif
 

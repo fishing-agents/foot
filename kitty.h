@@ -17,12 +17,13 @@ void kitty_scroll_down(struct terminal *term, int rows);
 /* Grid-owned surface lifecycle helpers. */
 void kitty_placement_destroy(struct kitty_placement *placement);
 void kitty_placements_clear(struct grid *grid);
+/* Discard displayed images and dirty only their old cell bounds. */
+void kitty_placements_invalidate(struct terminal *term);
 bool kitty_placement_clone(
     struct kitty_placement *dst, const struct kitty_placement *src);
 
-/* Called around the normal text pass: prepare forces a fresh background/text
- * render below every visible placement; render composites positive-z images
- * above it and adds their bounds to the frame damage. */
-void kitty_render_prepare(struct terminal *term);
-void kitty_render_placements(
+/* Composite positive-z images only over freshly repainted text/Sixel pixels.
+ * Scroll copies and buffer-age repairs already include images and must not be
+ * blended again. Returns the number of image pixels submitted to Pixman. */
+uint64_t kitty_render_placements(
     struct terminal *term, pixman_image_t *pix, pixman_region32_t *damage);

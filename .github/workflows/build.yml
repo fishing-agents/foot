@@ -45,3 +45,4 @@ jobs:
           done
           test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
           python3 tests/kitty-graphics-smoke.py build/foot
+          FOOT_SMOKE_WORKERS=2 python3 tests/kitty-graphics-smoke.py build/foot

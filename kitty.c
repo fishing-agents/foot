@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "grid.h"
+#include "image-render.h"
 #include "kitty-graphics.h"
 #include "macros.h"
 #include "render.h"
@@ -141,17 +142,20 @@ kitty_image_reply(void *user, const char *data, size_t len)
 }
 
 static void
-kitty_mark_rect_dirty(struct terminal *term, int start_row, int end_row)
+kitty_mark_rect_dirty(struct terminal *term, int start_row, int end_row,
+                      int start_col, int end_col)
 {
     if (term->grid == NULL || term->grid->num_rows <= 0)
         return;
 
     start_row = max(start_row, 0);
     end_row = min(end_row, term->rows - 1);
+    start_col = max(start_col, 0);
+    end_col = min(end_col, term->cols - 1);
     for (int r = start_row; r <= end_row; r++) {
         struct row *row = grid_row_in_view(term->grid, r);
         row->dirty = true;
-        for (int c = 0; c < term->cols; c++)
+        for (int c = start_col; c <= end_col; c++)
             row->cells[c].attrs.clean = false;
     }
 }
@@ -214,42 +218,29 @@ kitty_render_dimensions(const struct terminal *term,
     return true;
 }
 
-static bool
-kitty_visible_y(const struct terminal *term, const struct kitty_placement *p,
-                int *screen_y, int *height)
-{
-    int ignored_width, ignored_x;
-    if (!kitty_render_dimensions(
-            term, p, &ignored_width, height, &ignored_x, screen_y))
-        return false;
-
-    int64_t y = (int64_t)term->margins.top +
-        (int64_t)kitty_row_delta(term, p->row) * term->cell_height +
-        p->y_offset + *screen_y;
-    if (y < INT_MIN || y > INT_MAX)
-        return false;
-    *screen_y = y;
-    return true;
-}
-
 static void
 kitty_mark_placement_dirty(struct terminal *term,
                            const struct kitty_placement *p)
 {
-    int y, height;
-    if (!kitty_visible_y(term, p, &y, &height))
+    int width, height, fit_x, fit_y;
+    if (!kitty_render_dimensions(term, p, &width, &height, &fit_x, &fit_y))
         return;
-
-    const int top = term->margins.top;
-    const int bottom = term->height - term->margins.bottom;
-    int64_t end = (int64_t)y + height;
-    if (y >= bottom || end <= top)
+    const int64_t x = (int64_t)term->margins.left +
+        (int64_t)p->col * term->cell_width + p->x_offset + fit_x;
+    const int64_t y = (int64_t)term->margins.top +
+        (int64_t)kitty_row_delta(term, p->row) * term->cell_height +
+        p->y_offset + fit_y;
+    const int64_t left = max(x, term->margins.left);
+    const int64_t top = max(y, term->margins.top);
+    const int64_t right = min(x + width, term->width - term->margins.right);
+    const int64_t bottom = min(y + height, term->height - term->margins.bottom);
+    if (right <= left || bottom <= top)
         return;
-
-    int first = (max(y, top) - top) / term->cell_height;
-    int last = (min((int)min(end, (int64_t)INT_MAX), bottom) - 1 - top) /
-        term->cell_height;
-    kitty_mark_rect_dirty(term, first, last);
+    kitty_mark_rect_dirty(
+        term, (top - term->margins.top) / term->cell_height,
+        (bottom - 1 - term->margins.top) / term->cell_height,
+        (left - term->margins.left) / term->cell_width,
+        (right - 1 - term->margins.left) / term->cell_width);
 }
 
 static size_t
@@ -421,10 +412,17 @@ kitty_remove_from_grid(struct terminal *term, struct grid *grid,
         if (!image_matches || !placement_matches)
             continue;
 
-        kitty_mark_placement_dirty(term, &it->item);
+        if (grid == term->grid)
+            kitty_mark_placement_dirty(term, &it->item);
         kitty_placement_destroy(&it->item);
         tll_remove(grid->kitty_placements, it);
     }
+}
+
+void
+kitty_placements_invalidate(struct terminal *term)
+{
+    kitty_remove_from_grid(term, term->grid, 0, 0);
 }
 
 static void
@@ -537,23 +535,16 @@ kitty_scroll_down(struct terminal *term, int rows)
         kitty_discard_reused_placements(term, rows, true);
 }
 
-void
-kitty_render_prepare(struct terminal *term)
-{
-    if (term->grid == NULL || tll_length(term->grid->kitty_placements) == 0)
-        return;
-
-    tll_foreach(term->grid->kitty_placements, it)
-        kitty_mark_placement_dirty(term, &it->item);
-}
-
-void
+uint64_t
 kitty_render_placements(struct terminal *term, pixman_image_t *pix,
                         pixman_region32_t *damage)
 {
-    if (term->grid == NULL || tll_length(term->grid->kitty_placements) == 0)
-        return;
+    if (term->grid == NULL || damage == NULL ||
+        !pixman_region32_not_empty(damage) ||
+        tll_length(term->grid->kitty_placements) == 0)
+        return 0;
 
+    uint64_t pixels = 0;
     const int clip_left = term->margins.left;
     const int clip_top = term->margins.top;
     const int clip_right = term->width - term->margins.right;
@@ -593,14 +584,12 @@ kitty_render_placements(struct terminal *term, pixman_image_t *pix,
         /* Bilinear sampling at scaled source boundaries must extend edge
          * texels, not blend against transparent black. */
         pixman_image_set_repeat(p->pix, PIXMAN_REPEAT_PAD);
-        pixman_image_composite32(
-            PIXMAN_OP_OVER, p->pix, NULL, pix,
-            left - x, top - y, 0, 0, left, top, right - left, bottom - top);
+        pixels += image_composite_damage(
+            PIXMAN_OP_OVER, p->pix, pix, left - x, top - y,
+            left, top, right - left, bottom - top, damage, NULL);
         pixman_transform_init_identity(&transform);
         pixman_image_set_transform(p->pix, &transform);
 
-        if (damage != NULL)
-            pixman_region32_union_rect(
-                damage, damage, left, top, right - left, bottom - top);
     }
+    return pixels;
 }
